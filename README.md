@@ -1,13 +1,13 @@
 # 🎸 Air Guitar Motion Studio
 
+> 📺 **Referensi utama:** [Reel air guitar oleh @byun_daeseng di Instagram](https://www.instagram.com/reel/DYeZsT_xsaF/)
+
 Mainkan gitar di udara — tanpa gitar. Aplikasi web yang mendeteksi gerakan kedua
 tangan lewat webcam: **tangan kiri memilih chord** dengan gerakan _pinch_ (jempol +
 telunjuk), **tangan kanan membunyikan chord** dengan gerakan _strumming_ ke bawah.
 
 Seluruh aplikasi ada dalam **satu file `index.html`** — tanpa build, tanpa backend,
 tanpa dependensi yang perlu di-_install_. Cukup buka di browser.
-
-> Terinspirasi dari referensi air guitar oleh [@byun_daeseng](https://instagram.com/byun_daeseng).
 
 ---
 
