@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Air Guitar Motion Studio</title>
+
+<!-- ============================================================
+     STYLES — dark theme, bold white typography (mengikuti referensi)
+     ============================================================ -->
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #15181d;
+    --panel-2: #1d2127;
+    --border: #2a2f37;
+    --text: #f5f7fa;
+    --muted: #8a93a0;
+    --accent: #22d3ee;   /* cyan  — tangan chord (kiri)  */
+    --accent2: #ff5a3c;  /* merah — tangan strum (kanan) */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 16px 28px;
+  }
+  header { width: 100%; max-width: 960px; margin-bottom: 12px; }
+  header h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; }
+  header p  { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  /* ---- Bar kontrol atas ---- */
+  .controls {
+    width: 100%; max-width: 960px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+  .chord-pill {
+    background: var(--panel-2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-weight: 800; font-size: 16px;
+    border-radius: 8px;
+    padding: 6px 14px;
+    min-width: 86px; text-align: center;
+  }
+  .ctl { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .ctl b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .ctl input[type="range"] { width: 110px; accent-color: var(--accent); }
+  .ctl input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+  .live-readout { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .live-readout b { color: var(--text); }
+  #testBtn, #swapBtn {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-weight: 700; font-size: 13px;
+    cursor: pointer;
+  }
+  #testBtn { margin-left: auto; }
+  #testBtn:hover, #swapBtn:hover { border-color: var(--accent); }
+
+  /* ---- Area video + canvas overlay ---- */
+  .stage {
+    position: relative;
+    width: 100%; max-width: 960px;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  #video { display: none; } /* frame digambar ulang ke canvas (mirror) */
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* Overlay tombol mulai (wajib: gesture user untuk kamera + audio) */
+  #startOverlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: rgba(8, 10, 13, 0.92);
+    z-index: 10; text-align: center; padding: 20px;
+  }
+  #startBtn {
+    background: var(--accent);
+    color: #06262b;
+    font-size: 18px; font-weight: 800;
+    border: none; border-radius: 12px;
+    padding: 16px 32px;
+    cursor: pointer;
+  }
+  #startBtn:hover { filter: brightness(1.1); }
+  #startOverlay small { color: var(--muted); max-width: 420px; line-height: 1.5; }
+  #startOverlay .err { color: #ff7a64; font-weight: 600; }
+
+  /* ---- Status bar bawah (4 panel, seperti referensi) ---- */
+  .statusbar {
+    width: 100%; max-width: 960px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .status-cell {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .status-cell .label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .status-cell .value { font-size: 18px; font-weight: 800; }
+  .status-cell .value.on  { color: var(--accent); }
+  .status-cell .value.hot { color: var(--accent2); }
+  @media (max-width: 640px) {
+    .statusbar { grid-template-columns: repeat(2, 1fr); }
+    header h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Air Guitar Motion Studio</h1>
+  <p>Tangan kanan: downstroke untuk strum &nbsp;·&nbsp; Tangan kiri: pinch (jempol + telunjuk) untuk memilih chord di grid</p>
+</header>
+
+<!-- ============ BAR KONTROL ATAS ============ -->
+<div class="controls">
+  <div class="chord-pill" id="chordDisplay">C</div>
+
+  <div class="ctl">
+    Pinch
+    <input type="range" id="pinchSlider" min="2" max="12" step="0.5" value="5">
+    <b id="pinchThreshVal">5.0</b>
+  </div>
+
+  <div class="ctl">
+    Strum
+    <input type="range" id="strumSlider" min="1" max="8" step="0.5" value="2">
+    <b id="strumThreshVal">2.0</b>
+  </div>
+
+  <!-- Nilai live sensor, seperti "핀치 2.8 · 스트럼 0.00" pada referensi -->
+  <div class="live-readout">live: pinch <b id="livePinch">0.0</b> · strum <b id="liveStrum">0.00</b></div>
+
+  <label class="ctl"><input type="checkbox" id="previewChk"> Preview</label>
+
+  <button id="testBtn">🔊 Tes Suara</button>
+  <button id="swapBtn">⇄ Tukar Tangan</button>
+</div>
+
+<!-- ============ VIDEO + CANVAS OVERLAY ============ -->
+<div class="stage">
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="startOverlay">
+    <button id="startBtn">▶ Mulai</button>
+    <small>Klik untuk mengaktifkan webcam &amp; audio.<br>
+    Posisikan kedua tangan di depan kamera — grid chord muncul di layar.</small>
+    <small class="err" id="startErr"></small>
+  </div>
+</div>
+
+<!-- ============ STATUS BAR BAWAH ============ -->
+<div class="statusbar">
+  <div class="status-cell">
+    <div class="label">Beat</div>
+    <div class="value" id="statBeat">0 · C</div>
+  </div>
+  <div class="status-cell">
+    <div class="label">Tangan Kanan</div>
+    <div class="value" id="statRight">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="label">Tangan Kiri</div>
+    <div class="value" id="statLeft">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="label">Audio Output</div>
+    <div class="value" id="statAudio">OFF</div>
+  </div>
+</div>
+
+<!-- ============================================================
+     LIBRARY VIA CDN (versi dipin agar stabil)
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+<script>
+"use strict";
+
+/* ============================================================
+   1. KONFIGURASI & KONSTANTA
+   ============================================================ */
+
+// Voicing chord gitar (open chord standar), urutan senar rendah → tinggi.
+// Dimainkan berurutan dengan jeda kecil agar terdengar seperti strum asli.
+const CHORDS = {
+  "C":  ["C3", "E3", "G3", "C4", "E4"],
+  "D":  ["D3", "A3", "D4", "F#4"],
+  "E":  ["E2", "B2", "E3", "G#3", "B3", "E4"],
+  "F":  ["F2", "C3", "F3", "A3", "C4", "F4"],
+  "G":  ["G2", "B2", "D3", "G3", "B3", "G4"],
+  "A":  ["A2", "E3", "A3", "C#4", "E4"],
+  "E7": ["E2", "B2", "D3", "G#3", "B3", "E4"],
+  "B7": ["B2", "D#3", "A3", "B3", "F#4"],
+  "C7": ["C3", "E3", "Bb3", "C4", "E4"],
+  "Dm": ["D3", "A3", "D4", "F4"],
+  "Em": ["E2", "B2", "E3", "G3", "B3", "E4"],
+  "Fm": ["F2", "C3", "F3", "Ab3", "C4", "F4"],
+  "G7": ["G2", "B2", "D3", "G3", "B3", "F4"],
+  "A7": ["A2", "E3", "G3", "C#4", "E4"],
+  "Am": ["A2", "E3", "A3", "C4", "E4"],
+};
+
+// Tata letak grid 2 baris × 8 kolom (sesuai referensi).
+const GRID_LAYOUT = [
+  ["C",  "D",  "E",  "F",  "G",  "A",  "E7", "B7"],
+  ["C7", "Dm", "Em", "Fm", "G7", "A7", "Am", "F"],
+];
+
+// Posisi grid pada layar, dalam koordinat ternormalisasi (0..1).
+// Dibuat kompak (sel kecil) karena pemilihan chord memakai ujung jari —
+// cukup gerakan kecil untuk berpindah chord.
+const GRID = { x: 0.15, y: 0.16, w: 0.70, h: 0.18 };
+const GRID_COLS = 8;
+const GRID_ROWS = 2;
+
+const STRUM_COOLDOWN_MS = 300;  // anti double-trigger setelah strum
+const STRUM_SPACING_S   = 0.028; // jeda antar "senar" saat strum (detik)
+const MAX_STRINGS       = 6;
+
+const COLOR_CHORD_HAND = "#22d3ee"; // cyan  — tangan pemilih chord
+const COLOR_STRUM_HAND = "#ff5a3c"; // merah — tangan strum
+
+/* ============================================================
+   2. REFERENSI DOM
+   ============================================================ */
+const videoEl  = document.getElementById("video");
+const canvasEl = document.getElementById("canvas");
+const ctx      = canvasEl.getContext("2d");
+
+const chordDisplay   = document.getElementById("chordDisplay");
+const pinchSlider    = document.getElementById("pinchSlider");
+const strumSlider    = document.getElementById("strumSlider");
+const pinchThreshVal = document.getElementById("pinchThreshVal");
+const strumThreshVal = document.getElementById("strumThreshVal");
+const livePinchEl    = document.getElementById("livePinch");
+const liveStrumEl    = document.getElementById("liveStrum");
+const previewChk     = document.getElementById("previewChk");
+const testBtn        = document.getElementById("testBtn");
+const swapBtn        = document.getElementById("swapBtn");
+const startOverlay   = document.getElementById("startOverlay");
+const startBtn       = document.getElementById("startBtn");
+const startErr       = document.getElementById("startErr");
+
+const statBeat  = document.getElementById("statBeat");
+const statRight = document.getElementById("statRight");
+const statLeft  = document.getElementById("statLeft");
+const statAudio = document.getElementById("statAudio");
+
+/* ============================================================
+   3. STATE APLIKASI
+   ============================================================ */
+const state = {
+  selectedChord: "C",     // chord aktif (persist sampai pinch berikutnya)
+  beat: 0,                // counter strum
+  pinchThresh: 0.05,      // jarak normalisasi jempol-telunjuk
+  strumThresh: 0.02,      // sensitivitas strum (skala "per frame @30fps", lihat processStrumHand)
+  pinchActive: false,
+  pickGrip: false,        // jempol+telunjuk tangan kanan rapat (pegang pick)
+  prevStrumY: null,       // posisi Y pergelangan tangan strum di frame sebelumnya
+  prevStrumT: null,       // timestamp frame sebelumnya (untuk hitung kecepatan)
+  lastStrumAt: 0,         // timestamp strum terakhir (untuk cooldown)
+  strumFlashAt: 0,        // timestamp untuk efek kilat visual saat strum
+  handsSwapped: false,    // tombol "Tukar Tangan"
+  audioReady: false,
+  lastPreviewChord: null, // agar preview hanya bunyi saat chord berganti
+};
+
+/* ============================================================
+   4. AUDIO ENGINE (Tone.js)
+   ------------------------------------------------------------
+   Dua sumber suara:
+   (A) SAMPLER — sample gitar akustik ASLI dari CDN. Inilah yang
+       benar-benar terdengar seperti gitar. Dimuat di latar belakang.
+   (B) SYNTH FALLBACK — PolySynth(MonoSynth) dengan filter-envelope
+       (karakter "petik" dawai). Langsung siap & pasti berbunyi,
+       dipakai sampai sampler selesai dimuat (atau bila gagal).
+   ============================================================ */
+let sampler = null;       // (A) instrumen sample gitar asli
+let synth = null;         // (B) fallback sintetis
+let samplerReady = false; // true setelah semua sample termuat
+let strumGain = null;     // gain master (volume keseluruhan)
+let meter = null;         // pengukur level output — diagnosa "suara tidak keluar"
+
+function initAudio() {
+  // Rantai master: instrumen → gain → filter lowpass → kompresor → output.
+  const filter = new Tone.Filter(6500, "lowpass");
+  const comp   = new Tone.Compressor(-20, 3);
+  const vol    = new Tone.Volume(-2);
+  strumGain    = new Tone.Gain(1);
+  strumGain.chain(filter, comp, vol, Tone.Destination);
+
+  // Meter di ujung rantai: kalau angka dB bergerak saat strum,
+  // berarti sinyal audio benar-benar dikirim ke output device.
+  meter = new Tone.Meter({ smoothing: 0.85 });
+  vol.connect(meter);
+
+  // --- (B) Fallback sintetis: MonoSynth meniru petikan dawai ---
+  // filterEnvelope membuka cepat lalu menutup → bunyi "pluck" terang
+  // di awal yang langsung meredup, ciri khas senar dipetik.
+  synth = new Tone.PolySynth(Tone.MonoSynth, {
+    oscillator:     { type: "fmsawtooth", harmonicity: 0.5, modulationType: "triangle" },
+    envelope:       { attack: 0.005, decay: 0.9, sustain: 0.0, release: 1.2 },
+    filter:         { type: "lowpass", Q: 1, rolloff: -12 },
+    filterEnvelope: { attack: 0.004, decay: 0.25, sustain: 0.04, release: 1,
+                      baseFrequency: 250, octaves: 3.2, exponent: 2 },
+    volume: -12,
+  }).connect(strumGain);
+  synth.maxPolyphony = 32;
+
+  // --- (A) Sampler gitar akustik asli (latar belakang) ---
+  // Cukup beberapa titik sample; Tone.Sampler menggeser pitch untuk
+  // mengisi nada di antaranya. Senar terbuka standar gitar dipilih
+  // karena hampir pasti tersedia di set sample ini.
+  try {
+    sampler = new Tone.Sampler({
+      urls: {
+        E2: "E2.mp3", A2: "A2.mp3", D3: "D3.mp3",
+        G3: "G3.mp3", B3: "B3.mp3", E4: "E4.mp3", A4: "A4.mp3",
+      },
+      baseUrl: "https://nbrosowsky.github.io/tonejs-instruments/samples/guitar-acoustic/",
+      release: 1.2,
+      onload: () => {
+        samplerReady = true;
+        statAudio.textContent = "Sound ON · gitar";
+      },
+      onerror: (e) => {
+        console.warn("Sampler gitar gagal dimuat, pakai synth fallback:", e);
+      },
+    }).connect(strumGain);
+    sampler.volume.value = 2; // sample agak pelan, dinaikkan sedikit
+  } catch (e) {
+    console.warn("Sampler tidak bisa dibuat:", e);
+  }
+
+  state.audioReady = true;
+  statAudio.textContent = "Sound ON · synth";
+  statAudio.classList.add("on");
+}
+
+/**
+ * Bunyikan chord sebagai strum: tiap nada di-trigger berurutan dengan
+ * jeda kecil (downstroke = senar rendah dulu). Memakai sampler gitar
+ * asli bila sudah termuat, jika belum pakai synth fallback. Velocity
+ * diteruskan native sehingga strum cepat terdengar lebih keras.
+ */
+function strumChord(chordName, velocity = 0.9) {
+  const notes = CHORDS[chordName];
+  if (!notes || !state.audioReady) return;
+  const inst = samplerReady ? sampler : synth;
+  if (!inst) return;
+  const now = Tone.now();
+  notes.forEach((note, i) => {
+    // durasi 1.6s: nada berdering lalu release natural
+    inst.triggerAttackRelease(note, 1.6, now + i * STRUM_SPACING_S, velocity);
+  });
+}
+
+/* ============================================================
+   5. DETEKSI GESTUR
+   ============================================================ */
+
+// Jarak Euclidean 2D antar dua landmark (koordinat ternormalisasi).
+function dist2D(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * TANGAN KIRI — pinch untuk memilih chord.
+ * Jarak ujung jempol (landmark 4) ke ujung telunjuk (landmark 8)
+ * di bawah threshold = pinch. Titik tengah pinch dipetakan ke sel grid.
+ */
+function processChordHand(lm) {
+  const thumb = lm[4], index = lm[8];
+  const d = dist2D(thumb, index);
+  livePinchEl.textContent = (d * 100).toFixed(1);
+
+  state.pinchActive = d < state.pinchThresh;
+  if (!state.pinchActive) return;
+
+  // Titik pinch = tengah-tengah jempol & telunjuk
+  const px = (thumb.x + index.x) / 2;
+  const py = (thumb.y + index.y) / 2;
+
+  // Petakan ke sel grid (jika berada di dalam area grid)
+  const col = Math.floor((px - GRID.x) / (GRID.w / GRID_COLS));
+  const row = Math.floor((py - GRID.y) / (GRID.h / GRID_ROWS));
+  if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return;
+
+  const chord = GRID_LAYOUT[row][col];
+  if (chord !== state.selectedChord) {
+    state.selectedChord = chord;
+    // Mode preview: bunyikan pelan saat chord berganti
+    if (previewChk.checked && chord !== state.lastPreviewChord) {
+      strumChord(chord, 0.3);
+      state.lastPreviewChord = chord;
+    }
+  }
+}
+
+/**
+ * TANGAN KANAN — downstroke untuk strum.
+ * Kecepatan vertikal pergelangan (landmark 0) dihitung per DETIK
+ * (deltaY / deltaWaktu), bukan per frame — supaya deteksi tidak
+ * tergantung frame rate kamera (di kamera 60fps, deltaY per frame
+ * jadi kecil dan threshold per-frame tidak pernah tercapai).
+ * Slider tetap memakai skala lama: nilai = deltaY per frame @30fps ×100.
+ * Cooldown 300 ms agar tidak double-trigger.
+ */
+function processStrumHand(lm) {
+  const wristY = lm[0].y;
+  const nowMs  = performance.now();
+
+  // Status "pick grip" (jempol+telunjuk rapat seperti memegang pick)
+  state.pickGrip = dist2D(lm[4], lm[8]) < state.pinchThresh;
+
+  if (state.prevStrumY !== null && state.prevStrumT !== null) {
+    const dt = (nowMs - state.prevStrumT) / 1000;
+    if (dt > 0) {
+      const vy = (wristY - state.prevStrumY) / dt; // positif = bergerak turun, satuan layar/detik
+      // Tampilkan dalam skala yang sama dengan slider agar mudah dikalibrasi
+      liveStrumEl.textContent = ((Math.max(vy, 0) / 30) * 100).toFixed(2);
+
+      const vThresh = state.strumThresh * 30; // konversi skala slider → layar/detik
+      if (vy > vThresh && nowMs - state.lastStrumAt > STRUM_COOLDOWN_MS) {
+        state.lastStrumAt  = nowMs;
+        state.strumFlashAt = nowMs;
+        state.beat++;
+        // Velocity mengikuti kecepatan downstroke (0.5 .. 1.0)
+        const vel = Math.min(1, 0.5 + (vy - vThresh) * 0.5);
+        strumChord(state.selectedChord, vel);
+      }
+    }
+  }
+  state.prevStrumY = wristY;
+  state.prevStrumT = nowMs;
+}
+
+/* ============================================================
+   6. HAND TRACKING (MediaPipe Hands)
+   ============================================================ */
+const hands = new Hands({
+  locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`,
+});
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.5,
+});
+hands.onResults(onResults);
+
+/**
+ * Callback utama — dipanggil setiap frame yang selesai dianalisis.
+ * Semua koordinat di-mirror (x → 1-x) agar cocok dengan tampilan
+ * selfie (cermin) yang digambar ke canvas.
+ */
+function onResults(results) {
+  const W = canvasEl.width, H = canvasEl.height;
+
+  // --- Gambar frame video secara mirror (tampilan cermin/selfie) ---
+  ctx.save();
+  ctx.translate(W, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, W, H);
+  ctx.restore();
+
+  let chordHandSeen = false;
+  let strumHandSeen = false;
+
+  if (results.multiHandLandmarks && results.multiHandedness) {
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      // Mirror semua landmark agar konsisten dengan canvas
+      const lm = results.multiHandLandmarks[i].map((p) => ({ x: 1 - p.x, y: p.y, z: p.z }));
+
+      // CATATAN handedness: label MediaPipe mengasumsikan input sudah
+      // mirror (selfie). Feed getUserMedia TIDAK mirror, jadi label
+      // harus dibalik: "Left" dari MediaPipe = tangan KANAN user.
+      const rawLabel  = results.multiHandedness[i].label;
+      let isLeftHand  = rawLabel === "Right";        // dibalik (lihat catatan)
+      if (state.handsSwapped) isLeftHand = !isLeftHand;
+
+      if (isLeftHand) {
+        chordHandSeen = true;
+        processChordHand(lm);
+        drawHand(lm, COLOR_CHORD_HAND, "CHORD (L)");
+        drawPinchLine(lm);
+      } else {
+        strumHandSeen = true;
+        processStrumHand(lm);
+        drawHand(lm, COLOR_STRUM_HAND, "STRUM (R)");
+      }
+    }
+  }
+
+  // Reset tracking bila tangan hilang dari frame
+  if (!strumHandSeen) { state.prevStrumY = null; state.prevStrumT = null; state.pickGrip = false; }
+  if (!chordHandSeen) state.pinchActive = false;
+
+  drawChordGrid();
+  updateStatusBar(chordHandSeen, strumHandSeen);
+}
+
+/* ============================================================
+   7. RENDERING OVERLAY (Canvas)
+   ============================================================ */
+
+/** Grid chord 2×8 transparan dengan highlight chord terpilih. */
+function drawChordGrid() {
+  const W = canvasEl.width, H = canvasEl.height;
+  const cellW = (GRID.w / GRID_COLS) * W;
+  const cellH = (GRID.h / GRID_ROWS) * H;
+  const flash = performance.now() - state.strumFlashAt < 150; // kilat saat strum
+
+  ctx.font = `bold ${Math.round(cellH * 0.42)}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  for (let row = 0; row < GRID_ROWS; row++) {
+    for (let col = 0; col < GRID_COLS; col++) {
+      const x = GRID.x * W + col * cellW;
+      const y = GRID.y * H + row * cellH;
+      const chord = GRID_LAYOUT[row][col];
+      const selected = chord === state.selectedChord;
+
+      // Latar sel semi-transparan; sel terpilih diberi warna aksen
+      ctx.fillStyle = selected
+        ? (flash ? "rgba(34,211,238,0.65)" : "rgba(34,211,238,0.35)")
+        : "rgba(10, 14, 20, 0.55)";
+      ctx.fillRect(x, y, cellW, cellH);
+
+      ctx.strokeStyle = selected ? COLOR_CHORD_HAND : "rgba(255,255,255,0.35)";
+      ctx.lineWidth = selected ? 3 : 1;
+      ctx.strokeRect(x, y, cellW, cellH);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(chord, x + cellW / 2, y + cellH / 2);
+    }
+  }
+}
+
+/** Bounding box + skeleton tangan dengan label peran. */
+function drawHand(lm, color, label) {
+  const W = canvasEl.width, H = canvasEl.height;
+
+  // Skeleton (drawing_utils menerima koordinat ternormalisasi)
+  drawConnectors(ctx, lm, HAND_CONNECTIONS, { color, lineWidth: 2 });
+  drawLandmarks(ctx, lm, { color, radius: 2.5 });
+
+  // Bounding box dari min/max landmark + padding
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  for (const p of lm) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const pad = 0.02;
+  const bx = (minX - pad) * W, by = (minY - pad) * H;
+  const bw = (maxX - minX + pad * 2) * W, bh = (maxY - minY + pad * 2) * H;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(bx, by, bw, bh);
+
+  // Label peran di atas box
+  ctx.font = "bold 14px sans-serif";
+  const tw = ctx.measureText(label).width + 12;
+  ctx.fillStyle = color;
+  ctx.fillRect(bx, by - 22, tw, 20);
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, bx + 6, by - 12);
+}
+
+/** Garis jempol↔telunjuk tangan chord (berubah warna saat pinch). */
+function drawPinchLine(lm) {
+  const W = canvasEl.width, H = canvasEl.height;
+  ctx.beginPath();
+  ctx.moveTo(lm[4].x * W, lm[4].y * H);
+  ctx.lineTo(lm[8].x * W, lm[8].y * H);
+  ctx.strokeStyle = state.pinchActive ? "#ffe14d" : "rgba(255,255,255,0.5)";
+  ctx.lineWidth = state.pinchActive ? 4 : 2;
+  ctx.stroke();
+}
+
+/** Update teks status bar bawah + display chord atas. */
+function updateStatusBar(chordHandSeen, strumHandSeen) {
+  chordDisplay.textContent = state.selectedChord;
+  statBeat.textContent = `${state.beat} · ${state.selectedChord}`;
+
+  const justStrummed = performance.now() - state.lastStrumAt < 250;
+  statRight.textContent = !strumHandSeen ? "—"
+    : justStrummed ? "Strum!"
+    : state.pickGrip ? "Pick Grip ✓" : "Siap";
+  statRight.classList.toggle("hot", justStrummed);
+
+  statLeft.textContent = !chordHandSeen ? "—"
+    : state.pinchActive ? "Pinch ✓" : "Terdeteksi";
+  statLeft.classList.toggle("on", state.pinchActive);
+
+  // Level output live: bukti sinyal audio sampai (atau tidak) ke device
+  if (state.audioReady && meter) {
+    const db = meter.getValue();
+    statAudio.textContent = (typeof db === "number" && db > -60)
+      ? `ON · ${db.toFixed(0)} dB`
+      : "ON · silent";
+  }
+}
+
+/* ============================================================
+   8. UI WIRING (slider, checkbox, tombol)
+   ============================================================ */
+// Nilai slider ditampilkan ×100 dari koordinat ternormalisasi
+pinchSlider.addEventListener("input", () => {
+  state.pinchThresh = pinchSlider.value / 100;
+  pinchThreshVal.textContent = Number(pinchSlider.value).toFixed(1);
+});
+strumSlider.addEventListener("input", () => {
+  state.strumThresh = strumSlider.value / 100;
+  strumThreshVal.textContent = Number(strumSlider.value).toFixed(1);
+});
+swapBtn.addEventListener("click", () => {
+  state.handsSwapped = !state.handsSwapped;
+  state.prevStrumY = null; // reset tracking strum agar tidak salah trigger
+  state.prevStrumT = null;
+  swapBtn.textContent = state.handsSwapped ? "⇄ Tukar Tangan (aktif)" : "⇄ Tukar Tangan";
+});
+
+// Tombol tes suara dua tahap, untuk melokalisasi masalah audio:
+//   Tahap 1: beep 440 Hz LANGSUNG ke output, melewati seluruh rantai synth.
+//            Beep tidak terdengar → masalah di device/OS/tab, bukan aplikasi.
+//   Tahap 2: chord lewat rantai synth lengkap, 0.6 detik kemudian.
+//            Beep terdengar tapi chord tidak → masalah di rantai synth.
+testBtn.addEventListener("click", async () => {
+  if (!state.audioReady) {
+    await Tone.start();
+    initAudio();
+  }
+  if (Tone.context.state !== "running") await Tone.context.resume();
+
+  const beep = new Tone.Oscillator(440, "sine").toDestination();
+  beep.volume.value = -6;
+  beep.start();
+  beep.stop("+0.25");
+  setTimeout(() => beep.dispose(), 1000);
+
+  setTimeout(() => strumChord(state.selectedChord, 0.9), 600);
+});
+
+/* ============================================================
+   9. STARTUP — izin webcam + audio (perlu gesture user)
+   ============================================================ */
+startBtn.addEventListener("click", async () => {
+  startBtn.disabled = true;
+  startBtn.textContent = "Memuat…";
+  startErr.textContent = "";
+  try {
+    // Audio context hanya boleh dibuat setelah interaksi user
+    await Tone.start();
+    initAudio();
+
+    // Camera utils MediaPipe: pompa frame webcam → model hands
+    const camera = new Camera(videoEl, {
+      onFrame: async () => { await hands.send({ image: videoEl }); },
+      width: 1280,
+      height: 720,
+    });
+    await camera.start();
+
+    // Samakan resolusi canvas dengan video
+    canvasEl.width  = videoEl.videoWidth  || 1280;
+    canvasEl.height = videoEl.videoHeight || 720;
+
+    startOverlay.style.display = "none";
+  } catch (err) {
+    console.error(err);
+    startBtn.disabled = false;
+    startBtn.textContent = "▶ Mulai";
+    startErr.textContent =
+      "Gagal mengakses kamera. Pastikan izin webcam diberikan. " +
+      "Jika dibuka via file://, coba jalankan: python3 -m http.server";
+  }
+});
+</script>
+</body>
+</html>
